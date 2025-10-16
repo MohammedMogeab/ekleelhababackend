@@ -371,68 +371,62 @@ class ProductController extends Controller
 
     //     return response()->json($formattedProduct);
     // }
-public function show($id)
+  public function show($id)
 {
-    //  Create unique cache key for this product
     $cacheKey = "product_details_$id";
 
-    // Cache product data for 12 hours
-    $cachedProduct = Cache::remember($cacheKey, now()->addHours(12), function () use ($id) {
-        // Get the product with all related data
-        $product = DB::table('oc_product as p')
-            ->select(
-                'p.*',
-                'pd.name',
-                'pd.description',
-                'pd.meta_title',
-                'pd.meta_description',
-                'pd.meta_keyword',
-                'm.name as manufacturer_name',
-                DB::raw('(SELECT AVG(rating) FROM oc_review WHERE product_id = p.product_id AND status = 1) as average_rating'),
-                DB::raw('(SELECT COUNT(*) FROM oc_review WHERE product_id = p.product_id AND status = 1) as review_count')
-            )
-            ->join('oc_product_description as pd', 'p.product_id', '=', 'pd.product_id')
-            ->leftJoin('oc_manufacturer as m', 'p.manufacturer_id', '=', 'm.manufacturer_id')
-            ->where('p.product_id', '=', $id)
-            ->where('pd.language_id', '=', 1)
-            ->first();
+    // ✅ Smart Cache Check
+    if (Cache::has($cacheKey)) {
+        return response()->json(Cache::get($cacheKey));
+    }
 
-        if (!$product) {
-            return null;
-        }
+    // ✅ Fetch fresh data from DB
+    $product = DB::table('oc_product as p')
+        ->select(
+            'p.*',
+            'pd.name',
+            'pd.description',
+            'pd.meta_title',
+            'pd.meta_description',
+            'pd.meta_keyword',
+            'm.name as manufacturer_name',
+            DB::raw('(SELECT AVG(rating) FROM oc_review WHERE product_id = p.product_id AND status = 1) as average_rating'),
+            DB::raw('(SELECT COUNT(*) FROM oc_review WHERE product_id = p.product_id AND status = 1) as review_count')
+        )
+        ->join('oc_product_description as pd', 'p.product_id', '=', 'pd.product_id')
+        ->leftJoin('oc_manufacturer as m', 'p.manufacturer_id', '=', 'm.manufacturer_id')
+        ->where('p.product_id', '=', $id)
+        ->where('pd.language_id', '=', 1)
+        ->first();
 
-        // Format the product with deals
-        $formattedProduct = $this->formatProduct($product);
-
-        // Categories
-        $categories = DB::table('oc_product_to_category as ptc')
-            ->join('oc_category_description as cd', 'ptc.category_id', '=', 'cd.category_id')
-            ->where('ptc.product_id', '=', $id)
-            ->where('cd.language_id', '=', 1)
-            ->select('cd.category_id as id', 'cd.name')
-            ->get();
-
-        // Reviews
-        $reviews = DB::table('oc_review as r')
-            ->join('oc_customer as c', 'r.customer_id', '=', 'c.customer_id')
-            ->where('r.product_id', '=', $id)
-            ->where('r.status', '=', 1)
-            ->select('r.review_id as id', 'r.rating', 'r.text', 'r.date_added as created_at', 'c.firstname as name')
-            ->orderBy('r.date_added', 'desc')
-            ->get();
-
-        $formattedProduct['categories'] = $categories;
-        $formattedProduct['reviews'] = $reviews;
-
-        return $formattedProduct;
-    });
-
-    if (!$cachedProduct) {
+    if (!$product) {
         return response()->json(['message' => 'Product not found'], 404);
     }
 
-    return response()->json($cachedProduct);
+    // ✅ Format and enrich
+    $formattedProduct = $this->formatProduct($product);
+
+    $formattedProduct['categories'] = DB::table('oc_product_to_category as ptc')
+        ->join('oc_category_description as cd', 'ptc.category_id', '=', 'cd.category_id')
+        ->where('ptc.product_id', '=', $id)
+        ->where('cd.language_id', '=', 1)
+        ->select('cd.category_id as id', 'cd.name')
+        ->get();
+
+    $formattedProduct['reviews'] = DB::table('oc_review as r')
+        ->join('oc_customer as c', 'r.customer_id', '=', 'c.customer_id')
+        ->where('r.product_id', '=', $id)
+        ->where('r.status', '=', 1)
+        ->select('r.review_id as id', 'r.rating', 'r.text', 'r.date_added as created_at', 'c.firstname as name')
+        ->orderBy('r.date_added', 'desc')
+        ->get();
+
+    // ✅ Save into Redis cache
+    Cache::put($cacheKey, $formattedProduct, now()->addHours(12));
+
+    return response()->json($formattedProduct);
 }
+
 
     /**
      * Get related products.
