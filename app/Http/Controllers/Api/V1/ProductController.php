@@ -321,8 +321,63 @@ class ProductController extends Controller
     /**
      * Display the specified product
      */
-    public function show($id)
-    {
+    // public function show($id)
+    // {
+    //     // Get the product with all related data
+    //     $product = DB::table('oc_product as p')
+    //         ->select(
+    //             'p.*',
+    //             'pd.name',
+    //             'pd.description',
+    //             'pd.meta_title',
+    //             'pd.meta_description',
+    //             'pd.meta_keyword',
+    //             'm.name as manufacturer_name',
+    //             DB::raw('(SELECT AVG(rating) FROM oc_review WHERE product_id = p.product_id AND status = 1) as average_rating'),
+    //             DB::raw('(SELECT COUNT(*) FROM oc_review WHERE product_id = p.product_id AND status = 1) as review_count')
+    //         )
+    //         ->join('oc_product_description as pd', 'p.product_id', '=', 'pd.product_id')
+    //         ->leftJoin('oc_manufacturer as m', 'p.manufacturer_id', '=', 'm.manufacturer_id')
+    //         ->where('p.product_id', '=', $id)
+    //         ->where('pd.language_id', '=', 1)
+    //         ->first();
+
+    //     if (!$product) {
+    //         return response()->json(['message' => 'Product not found'], 404);
+    //     }
+
+    //     // Format the product with deal information
+    //     $formattedProduct = $this->formatProduct($product);
+
+    //     // Get categories
+    //     $categories = DB::table('oc_product_to_category as ptc')
+    //         ->join('oc_category_description as cd', 'ptc.category_id', '=', 'cd.category_id')
+    //         ->where('ptc.product_id', '=', $id)
+    //         ->where('cd.language_id', '=', 1)
+    //         ->select('cd.category_id as id', 'cd.name')
+    //         ->get();
+
+    //     // Get reviews
+    //     $reviews = DB::table('oc_review as r')
+    //         ->join('oc_customer as c', 'r.customer_id', '=', 'c.customer_id')
+    //         ->where('r.product_id', '=', $id)
+    //         ->where('r.status', '=', 1)
+    //         ->select('r.review_id as id', 'r.rating', 'r.text', 'r.date_added as created_at', 'c.firstname as name')
+    //         ->orderBy('r.date_added', 'desc')
+    //         ->get();
+
+    //     $formattedProduct['categories'] = $categories;
+    //     $formattedProduct['reviews'] = $reviews;
+
+    //     return response()->json($formattedProduct);
+    // }
+public function show($id)
+{
+    //  Create unique cache key for this product
+    $cacheKey = "product_details_$id";
+
+    // Cache product data for 12 hours
+    $cachedProduct = Cache::remember($cacheKey, now()->addHours(12), function () use ($id) {
         // Get the product with all related data
         $product = DB::table('oc_product as p')
             ->select(
@@ -343,13 +398,13 @@ class ProductController extends Controller
             ->first();
 
         if (!$product) {
-            return response()->json(['message' => 'Product not found'], 404);
+            return null;
         }
 
-        // Format the product with deal information
+        // Format the product with deals
         $formattedProduct = $this->formatProduct($product);
 
-        // Get categories
+        // Categories
         $categories = DB::table('oc_product_to_category as ptc')
             ->join('oc_category_description as cd', 'ptc.category_id', '=', 'cd.category_id')
             ->where('ptc.product_id', '=', $id)
@@ -357,7 +412,7 @@ class ProductController extends Controller
             ->select('cd.category_id as id', 'cd.name')
             ->get();
 
-        // Get reviews
+        // Reviews
         $reviews = DB::table('oc_review as r')
             ->join('oc_customer as c', 'r.customer_id', '=', 'c.customer_id')
             ->where('r.product_id', '=', $id)
@@ -369,8 +424,15 @@ class ProductController extends Controller
         $formattedProduct['categories'] = $categories;
         $formattedProduct['reviews'] = $reviews;
 
-        return response()->json($formattedProduct);
+        return $formattedProduct;
+    });
+
+    if (!$cachedProduct) {
+        return response()->json(['message' => 'Product not found'], 404);
     }
+
+    return response()->json($cachedProduct);
+}
 
     /**
      * Get related products.
